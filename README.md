@@ -11,8 +11,7 @@ AI MentorBot is a smart resume analyzer that recommends the best-fit career role
 
 ## 🚀 Live Demo
 
-👉 [Click here to try the app!](https://your-app-url.streamlit.app)  
-*(Update this link after deployment to Streamlit Cloud or other hosting)*
+👉 [Click here to try the app!](https://mentorbotcareer.streamlit.app/)  
 
 ---
 
