@@ -2,9 +2,10 @@ import streamlit as st
 import pandas as pd
 import pdfplumber
 from utils.recommender import recommend_roles
-from utils.soft_skill_extractor import extract_keywords as extract_soft_skills
-from utils.visuals import plot_skill_radar
+from utils.soft_skill_extractor import extract_keywords
 import io
+import re
+import altair as alt
 
 # 🎯 Page Config
 st.set_page_config(page_title="AI MentorBot", layout="centered")
@@ -19,67 +20,60 @@ if uploaded_file:
         resume_text = "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
     st.text_area("📋 Extracted Resume Text", resume_text, height=300)
 
-# 📝 Manual Input
+# 📝 Manual Input Fallback
 user_input = st.text_area("✍️ Or paste your resume or skills manually:", value=resume_text, height=200)
 
-# 📊 Load Role Data
+# 📊 Load roles dataset
 try:
     df_roles = pd.read_csv("data/roles_data.csv")
 except FileNotFoundError:
-    st.error("❌ roles_data.csv not found in the `data/` folder.")
+    st.error("❌ roles_data.csv not found. Please place it in the `data/` folder.")
     st.stop()
 
-# 📌 Suggest learning links
+# 🔎 Learning Link Suggestions — YouTube only
 def suggest_learning_links(missing_skills):
     suggestions = []
     for skill in missing_skills:
         query = skill.replace(" ", "+")
         youtube = f"https://www.youtube.com/results?search_query={query}+for+beginners"
-        roadmap = f"https://roadmap.sh/search?query={query}"
-        suggestions.append(f"- 🔗 [{skill} on YouTube]({youtube}) | 🗺️ [Roadmap.sh]({roadmap})")
+        suggestions.append(f"- 🔗 [{skill.title()} on YouTube]({youtube})")
     return "\n".join(suggestions)
 
-# 🚀 Recommendation Trigger
+# 🔍 Recommend Button
 if st.button("🔍 Find Suitable Roles"):
     if not user_input.strip():
-        st.warning("⚠️ Please provide resume content or list your skills.")
+        st.warning("⚠️ Please enter your resume or skills.")
     else:
-        soft_skills = extract_soft_skills(user_input)
-        st.markdown(f"🧠 **Extracted Skills:** `{soft_skills}`")
-
-        user_skills = set(skill.lower() for skill in soft_skills)
+        soft_skills = extract_keywords(user_input)
+        st.markdown(f"🧠 **Extracted Skills:** `{', '.join(soft_skills)}`")
 
         recommendations = recommend_roles(user_input, df_roles)
 
-        if not recommendations:
-            st.warning("⚠️ No matching roles found.")
-        else:
+        top_roles = recommendations[:3]
+        df_out = pd.DataFrame(top_roles)
+        st.download_button("📥 Download Top Role Matches", df_out.to_csv(index=False), "role_recommendations.csv", "text/csv")
+
+        for rec in top_roles:
+            st.subheader(f"🎯 {rec['role']} — {rec['match']}% match")
+            st.metric("✅ Skills Matched", f"{len(rec['matched_skills'])}/{len(rec['matched_skills']) + len(rec['missing_skills'])}")
+            st.markdown(f"**Missing Skills**: {', '.join(rec['missing_skills']) or 'None 🎉'}")
+            st.markdown(f"**Recommended Courses**: {rec['recommended_courses']}")
+            st.markdown("### 📎 YouTube Learning Resources")
+            st.markdown(suggest_learning_links(rec['missing_skills']))
             st.markdown("---")
-            st.markdown("## 🎯 Top Role Recommendations")
 
-            for rec in recommendations[:3]:
-                st.subheader(f"🎯 {rec['role']}")
-                st.metric("Match %", f"{rec['match']}%")
-                st.progress(rec['match'] / 100)
+        # 📊 Radar Chart
+        if top_roles:
+            radar_data = pd.DataFrame({
+                'Role': [r['role'] for r in top_roles],
+                'Match %': [r['match'] for r in top_roles]
+            })
+            chart = alt.Chart(radar_data).mark_bar().encode(
+                x='Role',
+                y='Match %',
+                color='Role'
+            ).properties(title='🔍 Skill Match % Across Top Roles')
+            st.altair_chart(chart, use_container_width=True)
 
-                st.markdown(f"**✅ Matched Skills**: {', '.join(rec['matched_skills']) or 'None'}")
-                st.markdown(f"**❌ Missing Skills**: {', '.join(rec['missing_skills']) or 'None 🎉'}")
-                st.markdown(f"**📘 Recommended Courses**: {rec['recommended_courses']}")
-
-                # 🎯 Radar Chart
-                if 'required_skills' in rec:
-                    fig = plot_skill_radar(user_skills, rec['matched_skills'] + rec['missing_skills'], rec['role'])
-                    st.plotly_chart(fig, use_container_width=True)
-
-                st.markdown("### 📚 Learn These Skills:")
-                st.markdown(suggest_learning_links(rec['missing_skills']))
-                st.markdown("---")
-
-            # ⬇️ Download Button
-            df_download = pd.DataFrame(recommendations[:3])
-            csv_data = df_download.to_csv(index=False)
-            st.download_button("📥 Download Recommendations", data=csv_data, file_name="role_recommendations.csv", mime="text/csv")
-
-        # 🧠 Session Save
         st.session_state["soft_skills"] = soft_skills
         st.session_state["user_input"] = user_input
